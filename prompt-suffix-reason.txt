@@ -1,0 +1,7 @@
+
+---
+
+Please respond only with exactly two line of text, as follows;
+
+Reason: [1-2 sentences describing the reason for your choice]
+Choice: [A / B / C] (a single letter, no other characters)

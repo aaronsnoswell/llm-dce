@@ -1,0 +1,18 @@
+Option A
+Appointment delivery method: In-person
+Location: Clinic
+Time away from usual activities (home, work or other) including travel: 2 hours
+Benefit of attending the appointment: The appointment was of limited benefit to me
+Payment option: You pay nothing (Bulk billed or covered by insurance/work)
+Other out of pocket cost (this may include parking, food, petrol, technology or any extra costs to attend): $75
+ 
+Option B
+Appointment delivery method: In-person
+Location: Clinic
+Time away from usual activities (home, work or other) including travel: 1 hour
+Benefit of attending the appointment: The appointment was of benefit to me
+Payment option: You pay for the consult (with or without a portion being reimbursed by Medicare/work/ insurance)
+Other out of pocket cost (this may include parking, food, petrol, technology or any extra costs to attend): $0
+ 
+Option C
+I would not attend the appointment

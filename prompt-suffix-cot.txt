@@ -1,0 +1,8 @@
+
+---
+
+Let's think step by step.
+Before giving your choice from A, B, or C, output a few sentences reviewing the details of each option.
+Discuss the benefits and drawbacks of each.
+Then, give your final answer by saying on the final line of your response;
+Choice: [A/B/C]
