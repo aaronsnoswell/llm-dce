@@ -1,1 +1,6 @@
-dotenv
+dotenv==0.9.9
+litellm==1.77.5
+ollama==0.6.0
+pydantic==2.11.9
+python-dotenv==1.1.1
+tqdm==4.66.4
