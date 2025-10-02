@@ -1,0 +1,6 @@
+
+---
+
+Your structured response should contain;
+ * A few sentences of discussion reviewing the details of each option. Discuss the benefits and drawbacks of each.
+ * Your final answer [A/B/C]
