@@ -1,20 +1,21 @@
 import re
 import os
 import csv
-import logging
 import json
+import logging
+import argparse
+from datetime import datetime
 from pprint import pprint
+
 from tqdm import tqdm
+from dotenv import load_dotenv
 import litellm
 from litellm import completion
-from dotenv import load_dotenv
-from datetime import datetime
-import argparse
-
 from litellm import supports_response_schema
 
 from pydantic import BaseModel
 from typing import Literal
+import uuid
 
 # litellm._turn_on_debug()
 
@@ -44,7 +45,7 @@ model_families = {
     ],
     "Anthropic": [
         # Large model
-        "claude-3-5-sonnet",
+        "claude-4-5-sonnet",
         # Lite model
         # "claude-3-haiku",
         # Most powerful reasoning model
@@ -87,6 +88,18 @@ model_families = {
     # ]
 }
 
+# Generate unique log filename
+log_filename = f"experiment_{uuid.uuid4()}.log"
+print(f"Logging to: {log_filename}")
+
+# Set up logging
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(log_filename), logging.StreamHandler()],
+)
+logger = logging.getLogger()
+
 
 # Configure logging - with filter for HTTP logs
 class HTTPFilter(logging.Filter):
@@ -95,14 +108,6 @@ class HTTPFilter(logging.Filter):
         return "HTTP Request" not in record.getMessage()
 
 
-# Set up logging
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("experiment_log.log"), logging.StreamHandler()],
-)
-logger = logging.getLogger()
-
 # Add HTTP filter to the root logger to suppress HTTP request logs
 http_filter = HTTPFilter()
 logger.addFilter(http_filter)
@@ -110,6 +115,7 @@ logger.addFilter(http_filter)
 # Also suppress logs from the urllib3 and requests libraries
 for log_name in ["urllib3", "requests", "httpx"]:
     logging.getLogger(log_name).setLevel(logging.WARNING)
+
 
 MODEL = model_families["OpenAI"][0]
 # MODEL = "gpt-4o-mini"  # Update this to your desired model
@@ -126,7 +132,7 @@ class MultiChoiceResponse(BaseModel):
 
 
 def run_experiment(model: str, num_responses: int):
-    global MODEL, NUM_RESPONSES
+    global MODEL, NUM_RESPONSES, START_RESPONSE_OFFSET
     MODEL = model
     NUM_RESPONSES = num_responses
 
@@ -164,7 +170,7 @@ def run_experiment(model: str, num_responses: int):
         raise
 
     # Prepare CSV output file
-    csv_filename = f"{MODEL.replace('/', '-')}-responses-conversation-{"structured" if RESPONSE_FORMATTING else "cot"}.csv"
+    csv_filename = f"{MODEL.replace('/', '-').replace(":", "-")}-responses-conversation-{"structured" if RESPONSE_FORMATTING else "cot"}.csv"
     columns = ["model", "conversation_thread", "scenario_id", "choice", "discussion"]
 
     # Check if file exists
@@ -176,17 +182,12 @@ def run_experiment(model: str, num_responses: int):
             print(f"Found existing file {csv_filename}.")
 
             # Count existing responses
-            with open(csv_filename, "r") as f:
+            with open(csv_filename, "r", encoding="utf-8", errors="replace") as f:
                 reader = csv.reader(f)
                 next(reader)  # Skip header
 
-                conversation_thread_column_index = columns.index("conversation_thread")
-                conversation_threads = set(
-                    int(row[conversation_thread_column_index])
-                    for row in reader
-                    if row[conversation_thread_column_index].isdigit()
-                )
-                existing_responses = len(conversation_threads)
+                row_count = sum(1 for row in reader)
+                existing_responses = row_count // 8
 
             # Update offset and remaining responses
             START_RESPONSE_OFFSET = existing_responses
@@ -197,7 +198,7 @@ def run_experiment(model: str, num_responses: int):
             )
 
         # Open file for appending
-        csv_file = open(csv_filename, "a", newline="")
+        csv_file = open(csv_filename, "a", newline="", encoding="utf-8")
         writer = csv.writer(csv_file)
 
         # Write header only if the file is newly created
@@ -243,19 +244,14 @@ def run_experiment(model: str, num_responses: int):
                     message = {"role": "user", "content": prompt}
                     messages.append(message)
 
-                    output_choice = None
-                    output_reason = None
-                    scenario_output = None
-
                     # Try to get a valid response
                     for retry in range(NUM_RETRIES):
 
-                        # We're not asking for reasons in the CoT version
+                        scenario_output = None
+                        output_choice = None
                         output_discussion = ""
 
                         try:
-                            output_choice = None
-
                             # Get response using LiteLLM
                             if RESPONSE_FORMATTING:
                                 response = completion(
@@ -321,7 +317,7 @@ def run_experiment(model: str, num_responses: int):
                                 conversation_thread,
                                 scenario_id,
                                 output_choice,
-                                output_discussion,
+                                output_discussion.replace("\n", " "),
                             ]
                         )
                     else:
@@ -391,16 +387,19 @@ def run_experiment(model: str, num_responses: int):
 
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser(description="Run the LLM experiment.")
-    parser.add_argument(
-        "model", type=str, help="The model string, e.g., 'gpt-5-nano-2025-08-07'."
-    )
+
     parser.add_argument(
         "--num_responses",
         type=int,
         help="The number of responses to generate.",
         default=1000,
         required=False,
+    )
+
+    parser.add_argument(
+        "model", type=str, help="The model string, e.g., 'gpt-5-nano-2025-08-07'."
     )
 
     args = parser.parse_args()
