@@ -50,6 +50,9 @@ python --version
 source $PBS_O_WORKDIR/../llm-dce-py/bin/activate
 python --version
 
+# Ensure requirements are up-to-date
+pip install -r $PBS_O_WORKDIR/requirements.txt
+
 # Load CUDA
 module load CUDA/12.8.0
 
@@ -57,10 +60,22 @@ module load CUDA/12.8.0
 nvidia-smi
 
 # Launch ollama server in background
-$PBS_O_WORKDIR/../ollama/bin/ollama serve &
+$PBS_O_WORKDIR/../ollama/bin/ollama serve > /dev/null 2>&1 &
+
+# Wait for ollama server to spin up
+echo "Waiting for Ollama server to start..."
+for i in {1..30}; do
+    if $PBS_O_WORKDIR/../ollama/bin/ollama list > /dev/null 2>&1; then
+        echo "Ollama server is ready!"
+        break
+    fi
+    echo "Attempt $i/30: Server not ready yet, waiting..."
+    sleep 2
+done
 
 # Check ollama is working 
 $PBS_O_WORKDIR/../ollama/bin/ollama list
 
 # Try running mistral run
+cd $PBS_O_WORKDIR
 python -m llm_dce --num_responses 10 "ollama/mistral:latest"
