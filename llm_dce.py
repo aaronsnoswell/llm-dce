@@ -498,7 +498,7 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
                     prompt_prefix,
                     prompt_suffix,
                     response_format,
-                    None,  # Placeholder conversation_thread for logging
+                    pbar.n + 1,
                     num_retries,
                 )
 
