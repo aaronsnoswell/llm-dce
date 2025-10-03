@@ -22,7 +22,7 @@
 #PBS -j oe
 
 # Set job name
-#PBS -N mistral-dce
+#PBS -N gpt-oss-dce
 
 # Activate Python3.6 with experimental libraries already installed
 # Best to use $HOME rather than /mnt/etc...
@@ -76,6 +76,13 @@ done
 # Check ollama is working 
 $PBS_O_WORKDIR/../ollama/bin/ollama list
 
-# Try running mistral run
+# Kick off run
+# ollama/mistral-nemo:latest - done
+# ollama/gpt-oss             - running
+# ollama/deepseek-r1:8b      - running
+# ollaam/qwen3:8b            - running
+# ollama/gemma3:27b          - running
+
+
 cd $PBS_O_WORKDIR
-python -m llm_dce --num_responses 10 "ollama/mistral:latest"
+python -m llm_dce --num_responses 1000 "ollama/gpt-oss"
