@@ -201,3 +201,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# PBS job outputs
+*.o*
+
+# Ignore temp CSV files in the root directory
+/*.csv
