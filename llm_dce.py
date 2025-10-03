@@ -60,6 +60,26 @@ class MultiChoiceResponse(BaseModel):
     response: Literal["A", "B", "C"]
 
 
+def load_scenarios() -> Dict[int, str]:
+    """Load all scenario files once at startup.
+
+    Returns:
+        Dictionary mapping scenario_id (1-8) to scenario text
+    """
+    scenarios = {}
+    for scenario_id in range(1, 9):
+        try:
+            with open(f"scenario-0{scenario_id}.txt", "r") as file:
+                scenarios[scenario_id] = file.read()
+            logger.info(f"Loaded scenario {scenario_id}")
+        except FileNotFoundError as e:
+            logger.error(f"Scenario file not found: scenario-0{scenario_id}.txt")
+            raise
+
+    print(f"Loaded {len(scenarios)} scenario files into memory")
+    return scenarios
+
+
 def load_prompts(response_format: ResponseFormat) -> Tuple[str, str]:
     """Load prompt files based on response formatting type.
 
@@ -161,17 +181,11 @@ def parse_response(
         output_discussion = structured_output_dict.get("discussion_of_options")
     else:
         # Parse CoT output
-        final_line = scenario_output.splitlines()[-1]
-        if "Choice: A" in final_line:
-            output_choice = "A"
-        elif "Choice: B" in final_line:
-            output_choice = "B"
-        elif "Choice: C" in final_line:
-            output_choice = "C"
-        else:
-            raise ValueError(f"Failed to parse choice from CoT response: {final_line}")
-        # Output discussion is all but the final line
-        output_discussion = "\n".join(scenario_output.splitlines()[:-1]).strip()
+        output_choice_match = re.search(r"Choice:\s*(.*)", scenario_output)
+        output_choice = (
+            output_choice_match.group(1).strip() if output_choice_match else None
+        )
+        output_discussion = scenario_output
 
     return output_choice, output_discussion
 
@@ -242,6 +256,7 @@ def process_scenario(
     model: str,
     messages: list,
     scenario_id: int,
+    scenario_text: str,
     prompt_prefix: str,
     prompt_suffix: str,
     response_format: ResponseFormat,
@@ -254,6 +269,7 @@ def process_scenario(
         model: Model identifier
         messages: Conversation history (will be modified)
         scenario_id: Scenario number (1-8)
+        scenario_text: The text content of the scenario
         prompt_prefix: Prefix for first scenario only
         prompt_suffix: Suffix for all scenarios
         response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
@@ -264,10 +280,6 @@ def process_scenario(
         Tuple of (updated_messages, answer_row)
     """
     try:
-        # Load this scenario
-        with open(f"scenario-0{scenario_id}.txt", "r") as file:
-            scenario_text = file.read()
-
         # Prepare the prompt (first scenario includes prefix)
         if scenario_id == 1:
             prompt = prompt_prefix + scenario_text + prompt_suffix
@@ -359,6 +371,9 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
             f"Running experiment with {model} in conversation mode with Chain-Of-Thought prompting."
         )
 
+    # Load all scenarios once at startup
+    scenarios = load_scenarios()
+
     # Load prompts
     prompt_prefix, prompt_suffix = load_prompts(response_format)
 
@@ -382,6 +397,7 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
                     model,
                     messages,
                     scenario_id,
+                    scenarios[scenario_id],  # Pass pre-loaded scenario text
                     prompt_prefix,
                     prompt_suffix,
                     response_format,
@@ -443,9 +459,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "model",
-        type=str,
-        help="The 'provider/model' string, e.g., 'openai/gpt-5-nano-2025-08-07'.",
+        "model", type=str, help="The model string, e.g., 'gpt-5-nano-2025-08-07'."
     )
 
     args = parser.parse_args()
