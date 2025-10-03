@@ -437,7 +437,9 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "model", type=str, help="The model string, e.g., 'gpt-5-nano-2025-08-07'."
+        "model",
+        type=str,
+        help="The 'provider/model' string, e.g., 'openai/gpt-5-nano-2025-08-07'.",
     )
 
     args = parser.parse_args()
