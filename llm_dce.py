@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 import litellm
 from litellm import completion
 from litellm import supports_response_schema
+import portalocker
 
 from pydantic import BaseModel
 from typing import Literal, Tuple, Optional, Dict
@@ -106,60 +107,130 @@ def load_prompts(response_format: ResponseFormat) -> Tuple[str, str]:
         raise
 
 
-def setup_csv_file(
-    model: str, response_format: ResponseFormat, num_responses: int
-) -> Tuple[object, object, int, int]:
-    """Set up CSV file for writing results, handling resume logic.
+def get_csv_filename(model: str, response_format: ResponseFormat) -> str:
+    """Generate standardized CSV filename for a model.
 
     Args:
         model: Model identifier string
-        response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
-        num_responses: Total number of responses desired
+        response_format: The response format type
 
     Returns:
-        Tuple of (csv_file, writer, start_offset, remaining_responses)
+        CSV filename string
     """
-    csv_filename = f"{model.replace('/', '-').replace(':', '-')}-responses-conversation-{response_format.value}.csv"
-    columns = ["model", "conversation_thread", "scenario_id", "choice", "discussion"]
+    return f"{model.replace('/', '-').replace(':', '-')}-responses-conversation-{response_format.value}.csv"
 
-    file_exists = os.path.isfile(csv_filename)
-    start_offset = 0
-    remaining_responses = num_responses
+
+def count_existing_responses(csv_filename: str) -> int:
+    """Count how many complete response sets (8 scenarios) exist in CSV.
+
+    Args:
+        csv_filename: Path to the CSV file
+
+    Returns:
+        Number of complete response sets (conversation threads)
+    """
+    if not os.path.isfile(csv_filename):
+        return 0
 
     try:
-        if file_exists:
-            print(f"Found existing file {csv_filename}.")
-
-            # Count existing responses
-            with open(csv_filename, "r", encoding="utf-8", errors="replace") as f:
-                reader = csv.reader(f)
-                next(reader)  # Skip header
-                row_count = sum(1 for row in reader)
-                existing_responses = row_count // 8
-
-            start_offset = existing_responses
-            remaining_responses = max(0, num_responses - existing_responses)
-            print(f"Found {existing_responses} existing responses.")
-            print(
-                f"Will generate {remaining_responses} additional responses, starting from offset {start_offset}."
-            )
-
-        # Open file for appending
-        csv_file = open(csv_filename, "a", newline="", encoding="utf-8")
-        writer = csv.writer(csv_file)
-
-        if not file_exists:
-            print(f"Created new CSV file {csv_filename}.")
-            writer.writerow(columns)
-            csv_file.flush()
-            print(
-                f"Will generate {remaining_responses} responses, starting from offset {start_offset}."
-            )
-
-        return csv_file, writer, start_offset, remaining_responses
-
+        with portalocker.Lock(
+            csv_filename, "r", timeout=30, encoding="utf-8", errors="replace"
+        ) as f:
+            reader = csv.reader(f)
+            next(reader)  # Skip header
+            row_count = sum(1 for row in reader)
+            # Each conversation thread has 8 scenarios
+            return row_count // 8
+    except portalocker.exceptions.LockException:
+        logger.warning(
+            f"Could not acquire lock to count responses in {csv_filename}, assuming 0"
+        )
+        return 0
     except Exception as e:
-        logger.error(f"Failed to open CSV file: {e}")
+        logger.warning(f"Error counting responses in {csv_filename}: {e}, assuming 0")
+        return 0
+
+
+def atomic_append_with_thread_id(csv_filename: str, rows: list, model: str) -> int:
+    """Atomically read max conversation_thread, update rows, and append to CSV.
+
+    This function performs all operations within a single file lock to ensure atomicity:
+    1. Acquires exclusive lock
+    2. Reads existing data to find max conversation_thread
+    3. Updates the provided rows with the next conversation_thread value
+    4. Appends the updated rows
+    5. Releases lock
+
+    Args:
+        csv_filename: Path to the CSV file
+        rows: List of rows to append (conversation_thread values will be updated)
+        model: Model identifier (for logging)
+
+    Returns:
+        The conversation_thread number that was assigned to these rows
+    """
+    columns = ["model", "conversation_thread", "scenario_id", "choice", "discussion"]
+
+    try:
+        # Check if file exists
+        file_exists = os.path.isfile(csv_filename)
+
+        # Open with exclusive lock (use r+ if exists, w+ if new)
+        mode = "r+" if file_exists else "w+"
+
+        with portalocker.Lock(
+            csv_filename, mode, timeout=30, encoding="utf-8", newline=""
+        ) as f:
+            # If file exists, read to find max conversation_thread
+            next_thread = 0
+            if file_exists:
+                try:
+                    reader = csv.DictReader(f)
+                    max_thread = -1
+                    for row in reader:
+                        try:
+                            thread_num = int(row["conversation_thread"])
+                            max_thread = max(max_thread, thread_num)
+                        except (ValueError, KeyError):
+                            continue
+                    next_thread = max_thread + 1
+                except Exception as e:
+                    logger.warning(
+                        f"Error reading existing threads, assuming next is 0: {e}"
+                    )
+                    next_thread = 0
+
+                # Move to end of file for appending
+                f.seek(0, 2)
+            else:
+                # New file - write header
+                writer = csv.writer(f)
+                writer.writerow(columns)
+                logger.info(f"Created new CSV file: {csv_filename}")
+
+            # Update all rows with the assigned conversation_thread
+            updated_rows = []
+            for row in rows:
+                # row format: [model, conversation_thread, scenario_id, choice, discussion]
+                # Update the conversation_thread (index 1)
+                row[1] = next_thread
+                updated_rows.append(row)
+
+            # Write all updated rows
+            writer = csv.writer(f)
+            writer.writerows(updated_rows)
+            f.flush()
+
+            logger.info(
+                f"Assigned conversation_thread={next_thread} and wrote {len(updated_rows)} rows"
+            )
+            return next_thread
+
+    except portalocker.exceptions.LockException:
+        logger.error(f"Could not acquire lock to write to {csv_filename}")
+        raise
+    except Exception as e:
+        logger.error(f"Error in atomic append operation for {csv_filename}: {e}")
         raise
 
 
@@ -181,10 +252,16 @@ def parse_response(
         output_discussion = structured_output_dict.get("discussion_of_options")
     else:
         # Parse CoT output
-        output_choice_match = re.search(r"Choice:\s*(.*)", scenario_output)
-        output_choice = (
-            output_choice_match.group(1).strip() if output_choice_match else None
-        )
+        final_line = scenario_output.splitlines()[-1]
+        if "Choice: A" in final_line:
+            output_choice = "A"
+        elif "Choice: B" in final_line:
+            output_choice = "B"
+        elif "Choice: C" in final_line:
+            output_choice = "C"
+        else:
+            raise ValueError(f"Failed to parse choice from CoT response: {final_line}")
+        # Output discussion is all but the final line
         output_discussion = scenario_output
 
     return output_choice, output_discussion
@@ -273,7 +350,7 @@ def process_scenario(
         prompt_prefix: Prefix for first scenario only
         prompt_suffix: Suffix for all scenarios
         response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
-        conversation_thread: Thread number for logging
+        conversation_thread: Thread number for logging (placeholder, will be updated later)
         num_retries: Number of retry attempts
 
     Returns:
@@ -310,7 +387,7 @@ def process_scenario(
 
             answer_row = [
                 model,
-                conversation_thread,
+                None,  # Placeholder - will be filled by atomic_append_with_thread_id
                 scenario_id,
                 output_choice,
                 output_discussion.replace("\n", " "),
@@ -325,7 +402,7 @@ def process_scenario(
 
             answer_row = [
                 model,
-                conversation_thread,
+                None,  # Placeholder - will be filled by atomic_append_with_thread_id
                 scenario_id,
                 "PARSING_FAILED",
                 "PARSING_FAILED",
@@ -340,7 +417,7 @@ def process_scenario(
         )
         answer_row = [
             model,
-            conversation_thread,
+            None,  # Placeholder - will be filled by atomic_append_with_thread_id
             scenario_id,
             "ERROR",
             str(e)[:100],
@@ -377,16 +454,31 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
     # Load prompts
     prompt_prefix, prompt_suffix = load_prompts(response_format)
 
-    # Set up CSV file
-    csv_file, writer, start_offset, remaining_responses = setup_csv_file(
-        model, response_format, num_responses
-    )
+    # Get CSV filename
+    csv_filename = get_csv_filename(model, response_format)
+    print(f"Output CSV file: {csv_filename}")
 
     try:
-        # Process each conversation thread
-        for conversation_thread in tqdm(
-            range(start_offset, start_offset + remaining_responses)
-        ):
+        # Create progress bar for full expected number of responses
+        pbar = tqdm(total=num_responses, desc="Generating responses")
+
+        iteration = 0
+        while iteration < num_responses:
+            # Check how many responses already exist
+            existing_responses = count_existing_responses(csv_filename)
+
+            # Update progress bar to reflect existing work
+            if pbar.n < existing_responses:
+                pbar.update(existing_responses - pbar.n)
+
+            # Exit if we already have enough responses
+            if existing_responses >= num_responses:
+                logger.info(
+                    f"Target of {num_responses} responses already reached. Exiting."
+                )
+                break
+
+            # Generate responses for this thread (conversation_thread will be assigned during write)
             thread_answers = []
             thread_success = True
             messages = []
@@ -397,11 +489,11 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
                     model,
                     messages,
                     scenario_id,
-                    scenarios[scenario_id],  # Pass pre-loaded scenario text
+                    scenarios[scenario_id],
                     prompt_prefix,
                     prompt_suffix,
                     response_format,
-                    conversation_thread,
+                    None,  # Placeholder conversation_thread for logging
                     num_retries,
                 )
 
@@ -411,32 +503,39 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
                 if answer_row[3] in ["PARSING_FAILED", "ERROR"]:
                     thread_success = False
 
-            # Save results to CSV after each thread
+            # Atomically append results to CSV (thread ID assigned here)
             try:
-                writer.writerows(thread_answers)
-                csv_file.flush()
+                assigned_thread = atomic_append_with_thread_id(
+                    csv_filename, thread_answers, model
+                )
                 completed_msg = (
                     "completed successfully"
                     if thread_success
                     else "completed with errors"
                 )
                 logger.info(
-                    f"Thread {conversation_thread} {completed_msg}. Saved {len(thread_answers)} results."
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to write results for thread {conversation_thread}: {e}"
+                    f"Thread {assigned_thread} {completed_msg}. Saved {len(thread_answers)} results."
                 )
 
-        logger.info(f"Experiment completed. Results saved to CSV file.")
+                # Update progress bar
+                pbar.update(1)
+
+            except Exception as e:
+                logger.error(f"Failed to write results: {e}")
+
+            iteration += 1
+
+        pbar.close()
+        logger.info(f"Experiment completed. Results saved to {csv_filename}")
 
     except KeyboardInterrupt:
         logger.info("Experiment interrupted by user. Partial results have been saved.")
+        if "pbar" in locals():
+            pbar.close()
     except Exception as e:
         logger.error(f"Unhandled exception: {e}")
-    finally:
-        if csv_file:
-            csv_file.close()
+        if "pbar" in locals():
+            pbar.close()
 
 
 if __name__ == "__main__":
