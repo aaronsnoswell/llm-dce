@@ -6,6 +6,7 @@ import logging
 import argparse
 from datetime import datetime
 from pprint import pprint
+from enum import Enum
 
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -19,6 +20,14 @@ import uuid
 
 # API keys will be automatically loaded from .env into environment variables
 load_dotenv()
+
+
+class ResponseFormat(Enum):
+    """Enum for response formatting types."""
+
+    STRUCTURED = "structured"
+    CHAIN_OF_THOUGHT = "cot"
+
 
 # Organize models by family with variants for each
 model_families = {
@@ -51,11 +60,11 @@ class MultiChoiceResponse(BaseModel):
     response: Literal["A", "B", "C"]
 
 
-def load_prompts(response_formatting: bool) -> Tuple[str, str]:
+def load_prompts(response_format: ResponseFormat) -> Tuple[str, str]:
     """Load prompt files based on response formatting type.
 
     Args:
-        response_formatting: Whether using structured response format
+        response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
 
     Returns:
         Tuple of (prompt_prefix, prompt_suffix)
@@ -64,7 +73,7 @@ def load_prompts(response_formatting: bool) -> Tuple[str, str]:
         with open("prompt-prefix.txt", "r") as file:
             prompt_prefix = file.read()
 
-        if response_formatting:
+        if response_format == ResponseFormat.STRUCTURED:
             with open("prompt-suffix-structured.txt", "r") as file:
                 prompt_suffix = file.read()
         else:
@@ -78,19 +87,19 @@ def load_prompts(response_formatting: bool) -> Tuple[str, str]:
 
 
 def setup_csv_file(
-    model: str, response_formatting: bool, num_responses: int
+    model: str, response_format: ResponseFormat, num_responses: int
 ) -> Tuple[object, object, int, int]:
     """Set up CSV file for writing results, handling resume logic.
 
     Args:
         model: Model identifier string
-        response_formatting: Whether using structured response format
+        response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
         num_responses: Total number of responses desired
 
     Returns:
         Tuple of (csv_file, writer, start_offset, remaining_responses)
     """
-    csv_filename = f"{model.replace('/', '-').replace(':', '-')}-responses-conversation-{'structured' if response_formatting else 'cot'}.csv"
+    csv_filename = f"{model.replace('/', '-').replace(':', '-')}-responses-conversation-{response_format.value}.csv"
     columns = ["model", "conversation_thread", "scenario_id", "choice", "discussion"]
 
     file_exists = os.path.isfile(csv_filename)
@@ -135,18 +144,18 @@ def setup_csv_file(
 
 
 def parse_response(
-    scenario_output: str, response_formatting: bool
+    scenario_output: str, response_format: ResponseFormat
 ) -> Tuple[Optional[str], str]:
     """Parse model response to extract choice and discussion.
 
     Args:
         scenario_output: Raw output from the model
-        response_formatting: Whether using structured response format
+        response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
 
     Returns:
         Tuple of (choice, discussion)
     """
-    if response_formatting:
+    if response_format == ResponseFormat.STRUCTURED:
         structured_output_dict = json.loads(scenario_output)
         output_choice = structured_output_dict.get("response")
         output_discussion = structured_output_dict.get("discussion_of_options")
@@ -164,7 +173,7 @@ def parse_response(
 def get_response_with_retry(
     model: str,
     messages: list,
-    response_formatting: bool,
+    response_format: ResponseFormat,
     conversation_thread: int,
     scenario_id: int,
     num_retries: int,
@@ -174,7 +183,7 @@ def get_response_with_retry(
     Args:
         model: Model identifier
         messages: Conversation history
-        response_formatting: Whether using structured response format
+        response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
         conversation_thread: Thread number for logging
         scenario_id: Scenario number for logging
         num_retries: Number of retry attempts
@@ -184,7 +193,7 @@ def get_response_with_retry(
     """
     for retry in range(num_retries):
         try:
-            if response_formatting:
+            if response_format == ResponseFormat.STRUCTURED:
                 response = completion(
                     model=model,
                     messages=messages,
@@ -200,7 +209,7 @@ def get_response_with_retry(
 
             # Parse the response
             output_choice, output_discussion = parse_response(
-                scenario_output, response_formatting
+                scenario_output, response_format
             )
 
             # If we got valid output, return it
@@ -229,7 +238,7 @@ def process_scenario(
     scenario_id: int,
     prompt_prefix: str,
     prompt_suffix: str,
-    response_formatting: bool,
+    response_format: ResponseFormat,
     conversation_thread: int,
     num_retries: int,
 ) -> Tuple[list, list]:
@@ -241,7 +250,7 @@ def process_scenario(
         scenario_id: Scenario number (1-8)
         prompt_prefix: Prefix for first scenario only
         prompt_suffix: Suffix for all scenarios
-        response_formatting: Whether using structured response format
+        response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
         conversation_thread: Thread number for logging
         num_retries: Number of retry attempts
 
@@ -266,7 +275,7 @@ def process_scenario(
         scenario_output, output_choice, output_discussion = get_response_with_retry(
             model,
             messages,
-            response_formatting,
+            response_format,
             conversation_thread,
             scenario_id,
             num_retries,
@@ -327,28 +336,29 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
     Args:
         model: Model identifier string
         num_responses: Number of conversation threads to run
+        num_retries: Number of retry attempts for failed responses
     """
     # Check if model supports structured responses
     if supports_response_schema(model=model):
         print(f"Model {model} supports response schema validation.")
-        response_formatting = True
+        response_format = ResponseFormat.STRUCTURED
         litellm.enable_json_schema_validation = True
         print(
             f"Running experiment with {model} in conversation mode with structured response prompting."
         )
     else:
         print(f"Model {model} does NOT support response schema validation.")
-        response_formatting = False
+        response_format = ResponseFormat.CHAIN_OF_THOUGHT
         print(
             f"Running experiment with {model} in conversation mode with Chain-Of-Thought prompting."
         )
 
     # Load prompts
-    prompt_prefix, prompt_suffix = load_prompts(response_formatting)
+    prompt_prefix, prompt_suffix = load_prompts(response_format)
 
     # Set up CSV file
     csv_file, writer, start_offset, remaining_responses = setup_csv_file(
-        model, response_formatting, num_responses
+        model, response_format, num_responses
     )
 
     try:
@@ -368,7 +378,7 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
                     scenario_id,
                     prompt_prefix,
                     prompt_suffix,
-                    response_formatting,
+                    response_format,
                     conversation_thread,
                     num_retries,
                 )
