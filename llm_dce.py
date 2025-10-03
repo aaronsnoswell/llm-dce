@@ -161,11 +161,17 @@ def parse_response(
         output_discussion = structured_output_dict.get("discussion_of_options")
     else:
         # Parse CoT output
-        output_choice_match = re.search(r"Choice:\s*(.*)", scenario_output)
-        output_choice = (
-            output_choice_match.group(1).strip() if output_choice_match else None
-        )
-        output_discussion = scenario_output
+        final_line = scenario_output.splitlines()[-1]
+        if "Choice: A" in final_line:
+            output_choice = "A"
+        elif "Choice: B" in final_line:
+            output_choice = "B"
+        elif "Choice: C" in final_line:
+            output_choice = "C"
+        else:
+            raise ValueError(f"Failed to parse choice from CoT response: {final_line}")
+        # Output discussion is all but the final line
+        output_discussion = "\n".join(scenario_output.splitlines()[:-1]).strip()
 
     return output_choice, output_discussion
 
