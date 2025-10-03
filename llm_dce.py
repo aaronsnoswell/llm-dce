@@ -44,19 +44,6 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 
-# Configure logging - with filter for HTTP logs
-class HTTPFilter(logging.Filter):
-    def filter(self, record):
-        return "HTTP Request" not in record.getMessage()
-
-
-http_filter = HTTPFilter()
-logger.addFilter(http_filter)
-
-for log_name in ["urllib3", "requests", "httpx"]:
-    logging.getLogger(log_name).setLevel(logging.WARNING)
-
-
 class MultiChoiceResponse(BaseModel):
     """Type class for structured model responses when they are supported"""
 
