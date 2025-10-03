@@ -258,11 +258,13 @@ def parse_response(
     else:
         # Parse CoT output
         final_line = scenario_output.splitlines()[-1]
-        if "Choice: A" in final_line:
+
+        # The models can be a bit markdown-happy, so we allow for that
+        if "Choice: A" in final_line or "**Choice:** A" in final_line:
             output_choice = "A"
-        elif "Choice: B" in final_line:
+        elif "Choice: B" in final_line or "**Choice:** B" in final_line:
             output_choice = "B"
-        elif "Choice: C" in final_line:
+        elif "Choice: C" in final_line or "**Choice:** C" in final_line:
             output_choice = "C"
         else:
             raise ValueError(f"Failed to parse choice from CoT response: {final_line}")
