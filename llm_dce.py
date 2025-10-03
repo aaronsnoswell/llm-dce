@@ -179,7 +179,12 @@ def atomic_append_with_thread_id(csv_filename: str, rows: list, model: str) -> i
         mode = "r+" if file_exists else "w+"
 
         with portalocker.Lock(
-            csv_filename, mode, timeout=30, encoding="utf-8", newline=""
+            csv_filename,
+            mode,
+            timeout=30,
+            encoding="utf-8",
+            newline="",
+            errors="replace",
         ) as f:
             # If file exists, read to find max conversation_thread
             next_thread = 0
