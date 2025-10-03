@@ -5,10 +5,10 @@
 
 # Number of Nodes (default 1), CPUs (default 1), RAM (default 1) per individual job
 # Better to use select command, rather than individual commands
-#PBS -l select=1:ncpus=4:mem=32GB:ngpus=1
+#PBS -l select=1:ncpus=4:mem=32GB:ngpus=1:gpu_id=H100
 
 # Max wall time per individual job - format is H:MM:SS (default 1hr) - don't bother specifying seconds
-#PBS -l walltime=0:15:00
+#PBS -l walltime=18:00:00
 
 # Configure job array to run 50 replicate experiments
 # The python sacred library will take care of giving each experiment a unique
@@ -30,24 +30,25 @@
 # Load a python version
 # Get Python ready
 module purge
-#module load GCCcore/13.2.0 Python/3.11.5
+module load GCCcore/13.2.0 Python/3.11.5
 #module load GCCcore/12.3.0 Python/3.11.3
-module load GCCcore/14.2.0 Python/3.13.1
-#source $PBS_O_WORKDIR/../llm-dce-py/bin/activate
+#module load GCCcore/14.2.0 Python/3.13.1
+
 
 # Check python version
 python --version
 
-# Make temp venv
-python -m venv $PBS_O_WORKDIR/llm-dce-py-tmp
-source $PBS_O_WORKDIR/llm-dce-py-tmp/bin/activate
+# Make temp venv ...
+#rm -rf $PBS_O_WORKDIR/llm-dce-py-tmp
+#python -m venv $PBS_O_WORKDIR/llm-dce-py-tmp
+#source $PBS_O_WORKDIR/llm-dce-py-tmp/bin/activate
+#python --version
+#pip install --upgrade pip
+#pip install -r $PBS_O_WORKDIR/requirements.txt
 
-# Check python version
+# ... OR Source existing venv
+source $PBS_O_WORKDIR/../llm-dce-py/bin/activate
 python --version
-
-# Install reqs
-pip install --upgrade pip
-pip install -r $PBS_O_WORKDIR/requirements.txt
 
 # Load CUDA
 module load CUDA/12.8.0
@@ -56,7 +57,7 @@ module load CUDA/12.8.0
 nvidia-smi
 
 # Launch ollama server in background
-$PBS_O_WORKDIR/../ollama/bin/ollama serve > /dev/null 2>&1 &
+$PBS_O_WORKDIR/../ollama/bin/ollama serve &
 
 # Check ollama is working 
 $PBS_O_WORKDIR/../ollama/bin/ollama list
