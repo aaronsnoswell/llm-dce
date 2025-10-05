@@ -81,11 +81,13 @@ def load_scenarios() -> Dict[int, str]:
     return scenarios
 
 
-def load_prompts(response_format: ResponseFormat) -> Tuple[str, str]:
+def load_prompts(response_format: ResponseFormat, think_tag: bool) -> Tuple[str, str]:
     """Load prompt files based on response formatting type.
 
     Args:
         response_format: The response format type (STRUCTURED or CHAIN_OF_THOUGHT)
+        think_tag: Whether to end the prompt suffix with "<think>\n" or not - needed
+            for models like DeepSeek that place reasoning in these brackets
 
     Returns:
         Tuple of (prompt_prefix, prompt_suffix)
@@ -100,6 +102,9 @@ def load_prompts(response_format: ResponseFormat) -> Tuple[str, str]:
         else:
             with open("prompt-suffix-cot.txt", "r") as file:
                 prompt_suffix = file.read()
+
+        if think_tag:
+            prompt_suffix += "\n<think>\n"
 
         return prompt_prefix, prompt_suffix
     except FileNotFoundError as e:
@@ -432,13 +437,14 @@ def process_scenario(
         return messages, answer_row
 
 
-def run_experiment(model: str, num_responses: int, num_retries: int):
+def run_experiment(model: str, num_responses: int, num_retries: int, think_tag: bool):
     """Run the main experiment loop.
 
     Args:
         model: Model identifier string
         num_responses: Number of conversation threads to run
         num_retries: Number of retry attempts for failed responses
+        think_tah: Whether this model expects the prompt to end with a <think/> tag
     """
     # Check if model supports structured responses
     if supports_response_schema(model=model):
@@ -459,7 +465,7 @@ def run_experiment(model: str, num_responses: int, num_retries: int):
     scenarios = load_scenarios()
 
     # Load prompts
-    prompt_prefix, prompt_suffix = load_prompts(response_format)
+    prompt_prefix, prompt_suffix = load_prompts(response_format, think_tag)
 
     # Get CSV filename
     csv_filename = get_csv_filename(model, response_format)
@@ -565,9 +571,21 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "model", type=str, help="The model string, e.g., 'gpt-5-nano-2025-08-07'."
+        "--think_tag",
+        type=bool,
+        help="If set, the prompt suffix will end with a <think> tag, which is needed for models like DeepSeek that place reasoning in these brackets",
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
+        "provider_model",
+        type=str,
+        help="The provider/model string, e.g., 'openai/gpt-5-nano-2025-08-07'.",
     )
 
     args = parser.parse_args()
 
-    run_experiment(args.model, args.num_responses, args.num_retries)
+    run_experiment(
+        args.provider_model, args.num_responses, args.num_retries, args.think_tag
+    )

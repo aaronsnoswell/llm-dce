@@ -22,7 +22,7 @@
 #PBS -j oe
 
 # Set job name
-#PBS -N gpt-oss-dce
+#PBS -N deepseek-r1-8b-dce
 
 # Activate Python3.6 with experimental libraries already installed
 # Best to use $HOME rather than /mnt/etc...
@@ -85,4 +85,4 @@ $PBS_O_WORKDIR/../ollama/bin/ollama list
 
 
 cd $PBS_O_WORKDIR
-python -m llm_dce --num_responses 1000 "ollama/gpt-oss"
+python -m llm_dce --num_responses 1000 "ollama/deepseek-r1:8b" --think_tag
