@@ -22,6 +22,12 @@ import uuid
 # API keys will be automatically loaded from .env into environment variables
 load_dotenv()
 
+# Print out $OLLAMA_HOST to console
+print(f"OLLAMA_HOST: {os.getenv('OLLAMA_HOST')}")
+
+# Enable debugging logs for litellm
+litellm._turn_on_debug()
+
 
 class ResponseFormat(Enum):
     """Enum for response formatting types."""
@@ -572,9 +578,8 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--think_tag",
-        type=bool,
         help="If set, the prompt suffix will end with a <think> tag, which is needed for models like DeepSeek that place reasoning in these brackets",
-        default=False,
+        action="store_true",
         required=False,
     )
 

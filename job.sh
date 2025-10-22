@@ -22,7 +22,7 @@
 #PBS -j oe
 
 # Set job name
-#PBS -N deepseek-r1-8b-dce
+#PBS -N qwen3-30b
 
 # Activate Python3.6 with experimental libraries already installed
 # Best to use $HOME rather than /mnt/etc...
@@ -30,6 +30,15 @@
 # Load a python version
 # Get Python ready
 module purge
+
+# Fix for eResearch JOB-971: if we're running on an A100 node, we need to set MODULEPATH differently to avoid a Python core dump error
+# N.b. also, A100 nodes only support [module load GCCcore/13.2.0 Python/3.11.5] and [module load GCCcore/12.3.0 Python/3.11.3]
+# A100s DO NOT support [module load GCCore/13.3.0 Python/3.12.3] - this only works on H100s
+if [[ $HOSTNAME =~ "gpu0" ]]
+  then
+  export MODULEPATH=/mnt/weka/pkg/rhel94/AMD-25-1/modules/all/Core
+fi
+
 module load GCCcore/13.2.0 Python/3.11.5
 #module load GCCcore/12.3.0 Python/3.11.3
 #module load GCCcore/14.2.0 Python/3.13.1
@@ -59,8 +68,25 @@ module load CUDA/12.8.0
 # Check GPU is available
 nvidia-smi
 
+# Print CUDA devices
+echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.device_count()); print(torch.cuda.current_device()); print(torch.cuda.get_device_name(0))"
+
+# Choose a random port to run ollama on
+OLLAMA_RND_PORT=
+while [ -z ${OLLAMA_RND_PORT} ]
+do
+    let "OLLAMA_TMP_RND_PORT = 11434 + ${RANDOM:0:3}"
+    echo "Checking port ${OLLAMA_TMP_RND_PORT} is free"
+    nc -z localhost "${OLLAMA_TMP_RND_PORT}" || OLLAMA_RND_PORT=${OLLAMA_TMP_RND_PORT}
+done
+echo "Port: $OLLAMA_RND_PORT is free"
+
+export OLLAMA_HOST=127.0.0.1:${OLLAMA_RND_PORT}
+export OLLAMA_API_BASE=http://127.0.0.1:${OLLAMA_RND_PORT}
+
 # Launch ollama server in background
-$PBS_O_WORKDIR/../ollama/bin/ollama serve > /dev/null 2>&1 &
+nohup $PBS_O_WORKDIR/../ollama/bin/ollama serve &
 
 # Wait for ollama server to spin up
 echo "Waiting for Ollama server to start..."
@@ -77,12 +103,5 @@ done
 $PBS_O_WORKDIR/../ollama/bin/ollama list
 
 # Kick off run
-# ollama/mistral-nemo:latest - done
-# ollama/gpt-oss             - running
-# ollama/deepseek-r1:8b      - running
-# ollaam/qwen3:8b            - running
-# ollama/gemma3:27b          - running
-
-
 cd $PBS_O_WORKDIR
-python -m llm_dce --num_responses 1000 "ollama/deepseek-r1:8b" --think_tag
+python -m llm_dce --num_responses 1000 "ollama/qwen3:30b"
